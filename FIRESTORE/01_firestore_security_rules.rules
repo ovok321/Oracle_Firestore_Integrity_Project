@@ -1,0 +1,49 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function validCoreProduct() {
+      return request.resource.data.keys().hasAll([
+          'product_id',
+          'name',
+          'category',
+          'price',
+          'stock'
+        ])
+        && request.resource.data.product_id is int
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.category is string
+        && request.resource.data.category.size() > 0
+        && request.resource.data.price is number
+        && request.resource.data.price >= 0
+        && request.resource.data.stock is int
+        && request.resource.data.stock >= 0;
+    }
+
+    match /products/{productId} {
+      // Temporary academic-test rules:
+      // core fields are validated, while extra category-specific
+      // fields are intentionally allowed.
+      allow create: if validCoreProduct();
+
+      // A repeated set() on the same document ID becomes an update.
+      // Updates are denied for the controlled duplicate-ID test.
+      allow update: if false;
+
+      // Needed so the test runner can inspect and clean up test data.
+      allow read, delete: if true;
+    }
+
+    match /performance_products/{documentId} {
+      allow create: if validCoreProduct();
+      allow update: if false;
+      allow read, delete: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,16 @@
+00_PROJECT_PLAN.md
+EVIDENCE_SCREENSHOTS_CHECKLIST.md
+FILE_INVENTORY.txt
+FIRESTORE/01_firestore_security_rules.rules
+FIRESTORE/02_firestore_test_runner.html
+FIRESTORE/FIREBASE_SETUP_GUIDE.md
+ORACLE/01_create_oracle_schema.sql
+ORACLE/02_run_oracle_integrity_tests.sql
+ORACLE/03_oracle_integrity_summary.sql
+ORACLE/04_oracle_performance_test.sql
+ORACLE/05_oracle_performance_summary.sql
+ORACLE/99_optional_cleanup.sql
+README_START_HERE.md
+REPORT_MAPPING.md
+RESULTS/integrity_results_template.csv
+RESULTS/performance_results_template.csv

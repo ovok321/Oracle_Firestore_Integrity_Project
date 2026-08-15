@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEG2102 Firestore Integrity Test Runner</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+body { font-family: Arial, sans-serif; max-width: 1150px; margin: 30px auto; padding: 0 20px; line-height: 1.45; }
+button { padding: 10px 14px; margin: 5px 5px 5px 0; cursor: pointer; }
+table { border-collapse: collapse; width: 100%; margin: 18px 0 30px; }
+th, td { border: 1px solid #bbb; padding: 8px; text-align: left; vertical-align: top; }
+th { background: #eee; }
+.pass { font-weight: bold; }
+.status { padding: 10px; border: 1px solid #bbb; margin: 12px 0; }
+code { background: #eee; padding: 2px 4px; }
+</style>
+</head>
+<body>
+
+<h1>SEG2102 Firestore Integrity Test Runner</h1>
+<p><strong>Data Integrity and Schema Flexibility in Oracle Database and Firebase Firestore</strong></p>
+
+<p>Follow <code>FIREBASE_SETUP_GUIDE.md</code>, publish the supplied rules,
+and paste your Firebase configuration below.</p>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBqtVmGbuSNB_R8CLu0-nN4PetQ7XKxpNc",
+  authDomain: "seg2102-integrity-project.firebaseapp.com",
+  projectId: "seg2102-integrity-project",
+  storageBucket: "seg2102-integrity-project.firebasestorage.app",
+  messagingSenderId: "500737095792",
+  appId: "1:500737095792:web:3992809c7cf1dea922dcb5",
+  measurementId: "G-4B63GN5S2N"
+};
+</script>
+
+<div>
+<button onclick="connectFirebase()">1. Connect to Firebase</button>
+<button onclick="runIntegrityTests()">2. Run Integrity Tests</button>
+<button onclick="runPerformanceTests()">3. Run Performance Test</button>
+<button onclick="downloadIntegrityCSV()">Download Integrity CSV</button>
+<button onclick="downloadPerformanceCSV()">Download Performance CSV</button>
+</div>
+
+<div id="status" class="status">Not connected yet.</div>
+
+<h2>Integrity Test Results</h2>
+<table id="integrityTable">
+<thead>
+<tr>
+<th>#</th><th>Test</th><th>Category</th><th>Expected</th>
+<th>Actual</th><th>PASS/FAIL</th><th>Message</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+
+<h2>Integrity Summary</h2>
+<div id="integritySummary">Run the integrity tests first.</div>
+
+<h2>Performance Results</h2>
+<table id="performanceTable">
+<thead><tr><th>Dataset size</th><th>Run</th><th>Elapsed ms</th></tr></thead>
+<tbody></tbody>
+</table>
+
+<h2>Performance Summary</h2>
+<div id="performanceSummary">Run the performance test first.</div>
+
+<script>
+let db = null;
+let connected = false;
+let integrityResults = [];
+let performanceResults = [];
+
+function setStatus(message) {
+    document.getElementById("status").textContent = message;
+}
+
+async function connectFirebase() {
+    try {
+        if (firebaseConfig.apiKey.includes("PASTE_")) {
+            throw new Error("Firebase configuration has not been pasted into the HTML file yet.");
+        }
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        db = firebase.firestore();
+
+        connected = true;
+        setStatus("Connected to Firebase project: " + firebaseConfig.projectId);
+    } catch (error) {
+        connected = false;
+        setStatus("Connection failed: " + error.message);
+        console.error(error);
+    }
+}
+
+function coreProduct(productId, name, category, price, stock) {
+    return {
+        product_id: productId,
+        name: name,
+        category: category,
+        price: price,
+        stock: stock
+    };
+}
+
+async function safeDelete(collectionName, documentId) {
+    try {
+        await db.collection(collectionName).doc(documentId).delete();
+    } catch (error) {
+        console.warn("Cleanup warning:", error);
+    }
+}
+
+async function runOneTest(test) {
+    let actual = "ACCEPTED";
+    let message = "Write accepted.";
+
+    try {
+        await test.action();
+    } catch (error) {
+        actual = "REJECTED";
+        message = error.code ? error.code + ": " + error.message : error.message;
+    }
+
+    return {
+        no: test.no,
+        name: test.name,
+        category: test.category,
+        expected: test.expected,
+        actual: actual,
+        passed: actual === test.expected ? "PASS" : "FAIL",
+        message: message
+    };
+}
+
+async function runIntegrityTests() {
+    if (!connected) {
+        setStatus("Connect to Firebase first.");
+        return;
+    }
+
+    setStatus("Running integrity tests...");
+    integrityResults = [];
+
+    const collection = db.collection("products");
+    const cleanupIds = [
+        "valid-1", "missing-name", "negative-price", "negative-stock",
+        "wrong-price-type", "duplicate-id", "laptop-flex", "clothing-flex"
+    ];
+
+    for (const id of cleanupIds) {
+        await safeDelete("products", id);
+    }
+
+    const tests = [
+        {
+            no: 1,
+            name: "Valid product",
+            category: "CORE INTEGRITY",
+            expected: "ACCEPTED",
+            action: async () => {
+                await collection.doc("valid-1").set(
+                    coreProduct(1, "Standard Keyboard", "Electronics", 129.90, 20)
+                );
+            }
+        },
+        {
+            no: 2,
+            name: "Missing required name",
+            category: "CORE INTEGRITY",
+            expected: "REJECTED",
+            action: async () => {
+                await collection.doc("missing-name").set({
+                    product_id: 2,
+                    category: "Electronics",
+                    price: 99.90,
+                    stock: 10
+                });
+            }
+        },
+        {
+            no: 3,
+            name: "Negative price",
+            category: "CORE INTEGRITY",
+            expected: "REJECTED",
+            action: async () => {
+                await collection.doc("negative-price").set(
+                    coreProduct(3, "Invalid Price Product", "Test", -50, 5)
+                );
+            }
+        },
+        {
+            no: 4,
+            name: "Negative stock",
+            category: "CORE INTEGRITY",
+            expected: "REJECTED",
+            action: async () => {
+                await collection.doc("negative-stock").set(
+                    coreProduct(4, "Invalid Stock Product", "Test", 50, -2)
+                );
+            }
+        },
+        {
+            no: 5,
+            name: "Wrong datatype for price",
+            category: "CORE INTEGRITY",
+            expected: "REJECTED",
+            action: async () => {
+                await collection.doc("wrong-price-type").set({
+                    product_id: 5,
+                    name: "Wrong Type Product",
+                    category: "Test",
+                    price: "FREE",
+                    stock: 5
+                });
+            }
+        },
+        {
+            no: 6,
+            name: "Duplicate product identifier",
+            category: "CORE INTEGRITY",
+            expected: "REJECTED",
+            action: async () => {
+                const ref = collection.doc("duplicate-id");
+                await ref.set(coreProduct(6, "First Product", "Test", 25, 1));
+                await ref.set(coreProduct(6, "Duplicate Product", "Test", 30, 2));
+            }
+        },
+        {
+            no: 7,
+            name: "Add laptop-specific ram_gb field",
+            category: "SCHEMA FLEXIBILITY",
+            expected: "ACCEPTED",
+            action: async () => {
+                const data = coreProduct(7, "Student Laptop", "Laptop", 2500, 4);
+                data.ram_gb = 16;
+                data.processor = "Example CPU";
+                await collection.doc("laptop-flex").set(data);
+            }
+        },
+        {
+            no: 8,
+            name: "Store different clothing structure",
+            category: "SCHEMA FLEXIBILITY",
+            expected: "ACCEPTED",
+            action: async () => {
+                const data = coreProduct(8, "Cotton Shirt", "Clothing", 79.90, 30);
+                data.size_label = "M";
+                data.material = "Cotton";
+                await collection.doc("clothing-flex").set(data);
+            }
+        }
+    ];
+
+    for (const test of tests) {
+        integrityResults.push(await runOneTest(test));
+    }
+
+    renderIntegrityResults();
+    setStatus("Integrity tests completed.");
+}
+
+function renderIntegrityResults() {
+    const tbody = document.querySelector("#integrityTable tbody");
+    tbody.innerHTML = "";
+
+    for (const result of integrityResults) {
+        const tr = document.createElement("tr");
+        const values = [
+            result.no, result.name, result.category, result.expected,
+            result.actual, result.passed, result.message
+        ];
+
+        for (const value of values) {
+            const td = document.createElement("td");
+            td.textContent = value;
+            if (value === "PASS") td.className = "pass";
+            tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+    }
+
+    const passed = integrityResults.filter(r => r.passed === "PASS").length;
+    const invalidCore = integrityResults.filter(
+        r => r.no >= 2 && r.no <= 6 && r.actual === "REJECTED"
+    ).length;
+    const flexibilityAccepted = integrityResults.filter(
+        r => (r.no === 7 || r.no === 8) && r.actual === "ACCEPTED"
+    ).length;
+
+    document.getElementById("integritySummary").innerHTML =
+        "<strong>Tests behaving as expected:</strong> " +
+        passed + "/8 (" + ((passed / 8) * 100).toFixed(2) + "%)<br>" +
+        "<strong>Invalid core records rejected:</strong> " +
+        invalidCore + "/5 (" + ((invalidCore / 5) * 100).toFixed(2) + "%)<br>" +
+        "<strong>Flexible-schema tests accepted without schema change:</strong> " +
+        flexibilityAccepted + "/2";
+}
+
+async function writePerformanceDataset(size, runNumber) {
+    const collectionName = "performance_products";
+    const prefix = "perf_" + size + "_" + runNumber + "_" + Date.now() + "_";
+    const refs = [];
+    const chunkSize = 400;
+
+    const started = performance.now();
+
+    for (let start = 0; start < size; start += chunkSize) {
+        const batch = db.batch();
+        const end = Math.min(start + chunkSize, size);
+
+        for (let i = start; i < end; i++) {
+            const ref = db.collection(collectionName).doc(prefix + i);
+            refs.push(ref);
+
+            batch.set(ref, coreProduct(
+                i + 1,
+                "Performance Product " + (i + 1),
+                i % 3 === 0 ? "Electronics" : (i % 3 === 1 ? "Clothing" : "Home"),
+                10 + ((i * 37) % 10000) / 10,
+                i % 100
+            ));
+        }
+        await batch.commit();
+    }
+
+    const ended = performance.now();
+
+    // Cleanup after timing. Deletion time is not part of the measured write time.
+    for (let start = 0; start < refs.length; start += chunkSize) {
+        const batch = db.batch();
+        const end = Math.min(start + chunkSize, refs.length);
+
+        for (let i = start; i < end; i++) {
+            batch.delete(refs[i]);
+        }
+        await batch.commit();
+    }
+
+    return ended - started;
+}
+
+async function runPerformanceTests() {
+    if (!connected) {
+        setStatus("Connect to Firebase first.");
+        return;
+    }
+
+    performanceResults = [];
+    const sizes = [100, 1000];
+
+    for (const size of sizes) {
+        for (let run = 1; run <= 3; run++) {
+            setStatus("Performance test: " + size + " writes, run " + run + "/3...");
+            const elapsed = await writePerformanceDataset(size, run);
+            performanceResults.push({
+                dataset_size: size,
+                run_number: run,
+                elapsed_ms: elapsed
+            });
+        }
+    }
+
+    renderPerformanceResults();
+    setStatus("Performance tests completed.");
+}
+
+function renderPerformanceResults() {
+    const tbody = document.querySelector("#performanceTable tbody");
+    tbody.innerHTML = "";
+
+    for (const result of performanceResults) {
+        const tr = document.createElement("tr");
+        for (const value of [
+            result.dataset_size,
+            result.run_number,
+            result.elapsed_ms.toFixed(2)
+        ]) {
+            const td = document.createElement("td");
+            td.textContent = value;
+            tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+    }
+
+    let summaryHTML = "";
+    for (const size of [100, 1000]) {
+        const values = performanceResults
+            .filter(r => r.dataset_size === size)
+            .map(r => r.elapsed_ms);
+        const average = values.reduce((a,b) => a + b, 0) / values.length;
+
+        summaryHTML += "<strong>" + size + " writes average:</strong> " +
+            average.toFixed(2) + " ms<br>";
+    }
+
+    summaryHTML += "<br><em>Firestore timing is end-to-end browser-to-cloud timing. " +
+        "Treat it as supplementary evidence rather than a perfectly controlled " +
+        "hardware comparison with Oracle.</em>";
+
+    document.getElementById("performanceSummary").innerHTML = summaryHTML;
+}
+
+function downloadCSV(filename, rows) {
+    const csv = rows.map(row => row.map(value => {
+        const text = String(value ?? "");
+        return "\"" + text.replaceAll("\"", "\"\"") + "\"";
+    }).join(",")).join("\n");
+
+    const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function downloadIntegrityCSV() {
+    if (!integrityResults.length) {
+        alert("Run the integrity tests first.");
+        return;
+    }
+
+    const rows = [[
+        "test_no","test_name","category","expected","actual","pass_fail","message"
+    ]];
+
+    for (const r of integrityResults) {
+        rows.push([r.no,r.name,r.category,r.expected,r.actual,r.passed,r.message]);
+    }
+
+    downloadCSV("firestore_integrity_results.csv", rows);
+}
+
+function downloadPerformanceCSV() {
+    if (!performanceResults.length) {
+        alert("Run the performance tests first.");
+        return;
+    }
+
+    const rows = [["dataset_size","run_number","elapsed_ms"]];
+    for (const r of performanceResults) {
+        rows.push([r.dataset_size,r.run_number,r.elapsed_ms.toFixed(2)]);
+    }
+
+    downloadCSV("firestore_performance_results.csv", rows);
+}
+</script>
+
+</body>
+</html>
